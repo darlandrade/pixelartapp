@@ -176,20 +176,20 @@ class PixelEditor:
     # ZOOM
     # Ajuste na função draw_pixel
     def draw_pixel(self, row, col, color):
-        """Desenha um único pixel na tela."""
+        """Desenha um único pixel na tela, considerando zoom e fundo quadriculado."""
+        if not (0 <= row < self.rows and 0 <= col < self.cols):
+            return
+
         x0, y0 = col * self.zoom, row * self.zoom
         x1, y1 = x0 + self.zoom, y0 + self.zoom
 
         if color is None:
-            # pixel transparente → desenha quadriculado
-            if (row + col) % 2 == 0:
-                fill_color = "#cccccc"
-            else:
-                fill_color = "#eeeeee"
-            self.canvas.create_rectangle(x0, y0, x1, y1, fill=fill_color, width=0)
+            # Pixel transparente → desenha o fundo quadriculado
+            fill_color = "#cccccc" if (row + col) % 2 == 0 else "#eeeeee"
         else:
-            # pixel com cor sólida
-            self.canvas.create_rectangle(x0, y0, x1, y1, fill=color, width=0)
+            fill_color = color
+
+        self.canvas.create_rectangle(x0, y0, x1, y1, fill=fill_color, width=0)
 
     def zoom_in(self):
         self.zoom = min(64, self.zoom + 1)  # incremento menor
@@ -709,13 +709,7 @@ class PixelEditor:
                     if preview:
                         x0, y0 = c * self.zoom, r * self.zoom
                         x1, y1 = x0 + self.zoom, y0 + self.zoom
-                        self.canvas.create_rectangle(
-                            x0, y0, x1, y1,
-                            fill=self.color_preview_temp,
-                            outline=self.current_color if not fill else "",
-                            width=1,
-                            tags="temp_shape"
-                        )
+                        self._draw_preview_pixel(r, c)
                     else:
                         draw_pixel_safe(r, c)
 
@@ -789,13 +783,7 @@ class PixelEditor:
                 if preview:
                     x0, y0 = c * self.zoom, r * self.zoom
                     x1, y1 = x0 + self.zoom, y0 + self.zoom
-                    self.canvas.create_rectangle(
-                        x0, y0, x1, y1,
-                        fill=self.color_preview_temp,
-                        outline=self.current_color if not fill else "",
-                        width=1,
-                        tags="temp_shape"
-                    )
+                    self._draw_preview_pixel(r, c)
                 else:
                     draw_pixel_safe(r, c)
 
@@ -831,13 +819,7 @@ class PixelEditor:
                 if preview:
                     x0, y0 = c * self.zoom, r * self.zoom
                     x1, y1 = x0 + self.zoom, y0 + self.zoom
-                    self.canvas.create_rectangle(
-                        x0, y0, x1, y1,
-                        fill=self.color_preview_temp,
-                        outline=self.current_color if not fill else "",
-                        width=1,
-                        tags="temp_shape"
-                    )
+                    self._draw_preview_pixel(r, c)
                 else:
                     draw_pixel_safe(r, c)
 
@@ -1058,17 +1040,11 @@ class PixelEditor:
 
         while True:
             if preview:
-                x0, y0 = c0 * self.zoom, r0 * self.zoom
-                x1, y1 = x0 + self.zoom, y0 + self.zoom
-                self.canvas.create_rectangle(
-                    x0, y0, x1, y1,
-                    fill=self.color_preview_temp,
-                    outline=self.current_color,
-                    width=1,
-                    tags="temp_shape"
-                )
+                # Usar função de preview que já trata mirror
+                self._draw_preview_pixel(r0, c0)
             else:
                 draw_pixel_safe(r0, c0)
+                # Mirror real
                 if self.mirror_mode in ("HORIZONTAL", "BOTH"):
                     draw_pixel_safe(r0, self.cols - 1 - c0)
                 if self.mirror_mode in ("VERTICAL", "BOTH"):
@@ -1093,13 +1069,7 @@ class PixelEditor:
     def _draw_pixel_canvas(self, r, c, color, preview=False, fill=False):
         x0, y0 = c * self.zoom, r * self.zoom
         x1, y1 = x0 + self.zoom, y0 + self.zoom
-        self.canvas.create_rectangle(
-            x0, y0, x1, y1,
-            fill=self.color_preview_temp if preview else color,
-            outline=self.current_color if not fill else "",
-            width=1,
-            tags="temp_shape" if preview else ""
-        )
+        self._draw_preview_pixel(r, c)
 
     # Funções auxiliares para mirror
     def _draw_mirror_preview(self, r, c):
@@ -1142,6 +1112,54 @@ class PixelEditor:
             self.pixels[mirror_r][mirror_c] = self.current_color
             action_pixels.append((mirror_r, mirror_c, old_color_m))
             self.draw_pixel(mirror_r, mirror_c, self.current_color)
+
+    def _draw_preview_pixel(self, row, col):
+        """Desenha um pixel de preview considerando mirror."""
+        x0, y0 = col * self.zoom, row * self.zoom
+        x1, y1 = x0 + self.zoom, y0 + self.zoom
+        self.canvas.create_rectangle(
+            x0, y0, x1, y1,
+            fill=self.color_preview_temp,
+            outline=self.current_color,
+            width=1,
+            tags="temp_shape"
+        )
+
+        # Mirror horizontal
+        if self.mirror_mode in ("HORIZONTAL", "BOTH"):
+            mc = self.cols - 1 - col
+            if mc != col:
+                x0, y0 = mc * self.zoom, row * self.zoom
+                x1, y1 = x0 + self.zoom, y0 + self.zoom
+                self.canvas.create_rectangle(x0, y0, x1, y1,
+                                             fill=self.color_preview_temp,
+                                             outline="black",
+                                             width=1,
+                                             tags="temp_shape")
+
+        # Mirror vertical
+        if self.mirror_mode in ("VERTICAL", "BOTH"):
+            mr = self.rows - 1 - row
+            if mr != row:
+                x0, y0 = col * self.zoom, mr * self.zoom
+                x1, y1 = x0 + self.zoom, y0 + self.zoom
+                self.canvas.create_rectangle(x0, y0, x1, y1,
+                                             fill=self.color_preview_temp,
+                                             outline="black",
+                                             width=1,
+                                             tags="temp_shape")
+
+        # Mirror ambos
+        if self.mirror_mode == "BOTH":
+            mr, mc = self.rows - 1 - row, self.cols - 1 - col
+            if (mr != row or mc != col):
+                x0, y0 = mc * self.zoom, mr * self.zoom
+                x1, y1 = x0 + self.zoom, y0 + self.zoom
+                self.canvas.create_rectangle(x0, y0, x1, y1,
+                                             fill=self.color_preview_temp,
+                                             outline="black",
+                                             width=1,
+                                             tags="temp_shape")
 
 
 if __name__ == "__main__":
