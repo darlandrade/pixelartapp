@@ -173,19 +173,22 @@ class PixelEditor:
                 self.set_color(color)
 
     # ZOOM
-    def draw_pixel(self, r, c, color):
-        ps = self.zoom
-        x1, y1 = c * ps, r * ps
-        x2, y2 = x1 + ps, y1 + ps
+    # Ajuste na função draw_pixel
+    def draw_pixel(self, row, col, color):
+        """Desenha um único pixel na tela."""
+        x0, y0 = col * self.zoom, row * self.zoom
+        x1, y1 = x0 + self.zoom, y0 + self.zoom
 
         if color is None:
-            # Pixel apagado, mostra o checker
-            if self.show_checker:
-                color = "#dddddd" if (r + c) % 2 == 0 else "#ffffff"
+            # pixel transparente → desenha quadriculado
+            if (row + col) % 2 == 0:
+                fill_color = "#cccccc"
             else:
-                color = self.bg_color
-
-        self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline=color)
+                fill_color = "#eeeeee"
+            self.canvas.create_rectangle(x0, y0, x1, y1, fill=fill_color, width=0)
+        else:
+            # pixel com cor sólida
+            self.canvas.create_rectangle(x0, y0, x1, y1, fill=color, width=0)
 
     def zoom_in(self):
         self.zoom = min(64, self.zoom + 1)  # incremento menor
@@ -623,7 +626,8 @@ class PixelEditor:
             self.draw_temp_rectangle(self.start_row, self.start_col, row, col)
         elif self.tool == "circle":
             self.canvas.delete("temp_shape")
-            self.draw_temp_circle(self.start_row, self.start_col, row, col, fill=False)
+            self.draw_circle_generic(self.start_row, self.start_col, row, col, fill=False, preview=True)
+
 
     def stop_action(self, event):
         if not self.drawing:
@@ -637,7 +641,8 @@ class PixelEditor:
         if self.tool == "rectangle":
             self.draw_rectangle(self.start_row, self.start_col, row, col)
         elif self.tool == "circle":
-            self.draw_circle(self.start_row, self.start_col, row, col)
+            self.draw_circle_generic(self.start_row, self.start_col, row, col, fill=False, preview=False)
+
         elif self.tool == "line":
             self.draw_line_action(self.start_row, self.start_col, row, col)
 
@@ -717,9 +722,18 @@ class PixelEditor:
     # ----------------------------
     # draw_temp_circle (preview)
     # ----------------------------
-    def draw_temp_circle(self, start_row, start_col, end_row, end_col, fill=True):
-        self.canvas.delete("temp_shape")
+    def draw_circle_generic(self, start_row, start_col, end_row, end_col, fill=True, preview=False):
+        """
+        Desenha ou faz preview de um círculo/ellipse.
 
+        preview=True -> desenha no canvas como preview (tag 'temp_shape')
+        preview=False -> desenha de fato e atualiza pixels/undo
+        """
+
+        if preview:
+            self.canvas.delete("temp_shape")
+
+        # Determina o retângulo que envolve o círculo
         r0, r1 = min(start_row, end_row), max(start_row, end_row)
         c0, c1 = min(start_col, end_col), max(start_col, end_col)
 
@@ -729,32 +743,84 @@ class PixelEditor:
         cx = c0 + rx
         cy = r0 + ry
 
-        # tolerância adaptativa para borda
-        tolerance = max(0.3, 1 / max(rx, ry))
+        action_pixels = []  # só usado se preview=False
 
-        for r in range(r0, r1 + 1):
-            for c in range(c0, c1 + 1):
-                dist = ((c - cx) ** 2) / (rx ** 2) + ((r - cy) ** 2) / (ry ** 2)
-                if fill:
-                    if dist <= 1:
+        # Bresenham adaptado para elipse
+        x = 0
+        y = ry
+        rx_sq = rx * rx
+        ry_sq = ry * ry
+        dx = 2 * ry_sq * x
+        dy = 2 * rx_sq * y
+
+        # Região 1
+        d1 = ry_sq - (rx_sq * ry) + (0.25 * rx_sq)
+        while dx < dy:
+            points = [
+                (cy + y, cx + x),
+                (cy + y, cx - x),
+                (cy - y, cx + x),
+                (cy - y, cx - x)
+            ]
+            for r, c in points:
+                if 0 <= r < self.rows and 0 <= c < self.cols:
+                    if preview:
                         x0, y0 = c * self.zoom, r * self.zoom
                         x1, y1 = x0 + self.zoom, y0 + self.zoom
-                        self.canvas.create_rectangle(
-                            x0, y0, x1, y1,
-                            fill="#961a82",
-                            width=0,
-                            tags="temp_shape"
-                        )
-                else:
-                    if 1 - tolerance <= dist <= 1 + tolerance:
+                        color = "#961a82" if fill else "#961a82"
+                        self.canvas.create_rectangle(x0, y0, x1, y1, fill=color, width=0, tags="temp_shape")
+                    else:
+                        old_color = self.pixels[r][c]
+                        self.pixels[r][c] = self.current_color
+                        action_pixels.append((r, c, old_color))
+                        self.draw_pixel(r, c, self.current_color)
+                        self.apply_mirror(r, c)
+            if d1 < 0:
+                x += 1
+                dx += 2 * ry_sq
+                d1 += dx + ry_sq
+            else:
+                x += 1
+                y -= 1
+                dx += 2 * ry_sq
+                dy -= 2 * rx_sq
+                d1 += dx - dy + ry_sq
+
+        # Região 2
+        d2 = (ry_sq) * ((x + 0.5) ** 2) + (rx_sq) * ((y - 1) ** 2) - (rx_sq * ry_sq)
+        while y >= 0:
+            points = [
+                (cy + y, cx + x),
+                (cy + y, cx - x),
+                (cy - y, cx + x),
+                (cy - y, cx - x)
+            ]
+            for r, c in points:
+                if 0 <= r < self.rows and 0 <= c < self.cols:
+                    if preview:
                         x0, y0 = c * self.zoom, r * self.zoom
                         x1, y1 = x0 + self.zoom, y0 + self.zoom
-                        self.canvas.create_rectangle(
-                            x0, y0, x1, y1,
-                            fill="#961a82",
-                            width=0,
-                            tags="temp_shape"
-                        )
+                        color = "#961a82" if fill else "#961a82"
+                        self.canvas.create_rectangle(x0, y0, x1, y1, fill=color, width=0, tags="temp_shape")
+                    else:
+                        old_color = self.pixels[r][c]
+                        self.pixels[r][c] = self.current_color
+                        action_pixels.append((r, c, old_color))
+                        self.draw_pixel(r, c, self.current_color)
+                        self.apply_mirror(r, c)
+            if d2 > 0:
+                y -= 1
+                dy -= 2 * rx_sq
+                d2 += rx_sq - dy
+            else:
+                y -= 1
+                x += 1
+                dx += 2 * ry_sq
+                dy -= 2 * rx_sq
+                d2 += dx - dy + rx_sq
+
+        if not preview and action_pixels:
+            self.undo_stack.append(action_pixels)
 
     def draw_temp_circle_filled(self, start_row, start_col, end_row, end_col):
         self.canvas.delete("temp_shape")
@@ -824,85 +890,7 @@ class PixelEditor:
                 d += 2 * (y - x) + 1
         return [(r, c) for r, c in pixels if 0 <= r < self.rows and 0 <= c < self.cols]
 
-    def draw_circle(self, start_row, start_col, end_row, end_col):
-        # Determina o retângulo que envolve o círculo
-        r0, r1 = min(start_row, end_row), max(start_row, end_row)
-        c0, c1 = min(start_col, end_col), max(start_col, end_col)
 
-        rx = (c1 - c0) // 2
-        ry = (r1 - r0) // 2
-        if rx == 0 or ry == 0:
-            return
-
-        cx = c0 + rx
-        cy = r0 + ry
-
-        action_pixels = []
-
-        # Bresenham adaptado para elipse
-        x = 0
-        y = ry
-        rx_sq = rx * rx
-        ry_sq = ry * ry
-        dx = 2 * ry_sq * x
-        dy = 2 * rx_sq * y
-
-        # Região 1
-        d1 = ry_sq - (rx_sq * ry) + (0.25 * rx_sq)
-        while dx < dy:
-            points = [
-                (cy + y, cx + x),
-                (cy + y, cx - x),
-                (cy - y, cx + x),
-                (cy - y, cx - x)
-            ]
-            for r, c in points:
-                if 0 <= r < self.rows and 0 <= c < self.cols:
-                    old_color = self.pixels[r][c]
-                    self.pixels[r][c] = self.current_color
-                    action_pixels.append((r, c, old_color))
-                    self.draw_pixel(r, c, self.current_color)
-                    self.apply_mirror(r, c)
-            if d1 < 0:
-                x += 1
-                dx += 2 * ry_sq
-                d1 += dx + ry_sq
-            else:
-                x += 1
-                y -= 1
-                dx += 2 * ry_sq
-                dy -= 2 * rx_sq
-                d1 += dx - dy + ry_sq
-
-        # Região 2
-        d2 = (ry_sq) * ((x + 0.5) ** 2) + (rx_sq) * ((y - 1) ** 2) - (rx_sq * ry_sq)
-        while y >= 0:
-            points = [
-                (cy + y, cx + x),
-                (cy + y, cx - x),
-                (cy - y, cx + x),
-                (cy - y, cx - x)
-            ]
-            for r, c in points:
-                if 0 <= r < self.rows and 0 <= c < self.cols:
-                    old_color = self.pixels[r][c]
-                    self.pixels[r][c] = self.current_color
-                    action_pixels.append((r, c, old_color))
-                    self.draw_pixel(r, c, self.current_color)
-                    self.apply_mirror(r, c)
-            if d2 > 0:
-                y -= 1
-                dy -= 2 * rx_sq
-                d2 += rx_sq - dy
-            else:
-                y -= 1
-                x += 1
-                dx += 2 * ry_sq
-                dy -= 2 * rx_sq
-                d2 += dx - dy + rx_sq
-
-        if action_pixels:
-            self.undo_stack.append(action_pixels)
 
     def adjust_color(self, hex_color, factor, lighten=False):
         """ Clareia ou escurece a cor """
