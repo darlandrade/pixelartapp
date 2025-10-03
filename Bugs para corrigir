@@ -1,0 +1,2 @@
+Próximos passos:
+Corrigir bug do Ctrl-Z (Desfazer) - Atualmente, ao apertar Ctrl-Z o desenho se apaga, mas ao desenhar novamente, ele se apaga e não conseguimos desenhar nada.
