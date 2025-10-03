@@ -32,6 +32,7 @@ class PixelEditor:
     def __init__(self, master, cols=32, rows=32, zoom=16):
         self.current_tool = None
         self.mirror_button = None
+        self.color_preview_temp = "#8ba334"
         self.master = master
         self.cols = cols
         self.rows = rows
@@ -623,7 +624,7 @@ class PixelEditor:
             self.draw_temp_line(self.start_row, self.start_col, row, col)
         elif self.tool == "rectangle":
             self.canvas.delete("temp_shape")
-            self.draw_temp_rectangle(self.start_row, self.start_col, row, col)
+            self.draw_rectangle_generic(self.start_row, self.start_col, row, col, fill=False, preview=True)
         elif self.tool == "circle":
             self.canvas.delete("temp_shape")
             self.draw_circle_generic(self.start_row, self.start_col, row, col, fill=False, preview=True)
@@ -639,7 +640,7 @@ class PixelEditor:
         self.canvas.delete("temp_shape")
 
         if self.tool == "rectangle":
-            self.draw_rectangle(self.start_row, self.start_col, row, col)
+            self.draw_rectangle_generic(self.start_row, self.start_col, row, col, fill=False, preview=False)
         elif self.tool == "circle":
             self.draw_circle_generic(self.start_row, self.start_col, row, col, fill=False, preview=False)
 
@@ -649,75 +650,69 @@ class PixelEditor:
         self.start_row, self.start_col = None, None
         self.current_stroke = []
 
-    def draw_temp_rectangle(self, event):
-        if self.start_row is None or self.start_col is None:
-            return
-
-        # Remove preview anterior
-        self.canvas.delete("temp_shape")
-
-        r0, c0 = self.start_row, self.start_col
-        r1, c1 = event.y // self.zoom, event.x // self.zoom
-
-        # Corrige para sempre ter r0 < r1 e c0 < c1
-        r0, r1 = min(r0, r1), max(r0, r1)
-        c0, c1 = min(c0, c1), max(c0, c1)
-
-        # Desenha retângulo temporário (apenas borda)
-        x1, y1 = c0 * self.zoom, r0 * self.zoom
-        x2, y2 = (c1 + 1) * self.zoom, (r1 + 1) * self.zoom
-        self.canvas.create_rectangle(
-            x1, y1, x2, y2,
-            outline=self.current_color,
-            width=1,
-            tags="temp_shape"
-        )
-
-    def draw_rectangle(self, start_row, start_col, end_row, end_col):
+    def draw_rectangle_generic(self, start_row, start_col, end_row, end_col, fill=True, preview=False):
+        # Corrige coordenadas
         r0, r1 = min(start_row, end_row), max(start_row, end_row)
         c0, c1 = min(start_col, end_col), max(start_col, end_col)
 
-        action_pixels = []
+        if preview:
+            # Remove preview anterior
+            self.canvas.delete("temp_shape")
 
-        for r in range(r0, r1 + 1):
-            for c in range(c0, c1 + 1):
-                # desenha só a borda
-                if r in (r0, r1) or c in (c0, c1):
-                    old_color = self.pixels[r][c]
-                    self.pixels[r][c] = self.current_color
-                    action_pixels.append((r, c, old_color))
-                    self.draw_pixel(r, c, self.current_color)
+            for r in range(r0, r1 + 1):
+                for c in range(c0, c1 + 1):
+                    # Se fill=False, desenha só a borda
+                    if fill or r in (r0, r1) or c in (c0, c1):
+                        x0, y0 = c * self.zoom, r * self.zoom
+                        x1, y1 = x0 + self.zoom, y0 + self.zoom
+                        self.canvas.create_rectangle(
+                            x0, y0, x1, y1,
+                            fill=self.color_preview_temp, # CORPREVIEW
+                            outline=self.current_color if not fill else "",
+                            width=1,
+                            tags="temp_shape"
+                        )
+        else:
+            # Desenho definitivo
+            action_pixels = []
+            for r in range(r0, r1 + 1):
+                for c in range(c0, c1 + 1):
+                    if fill or r in (r0, r1) or c in (c0, c1):
+                        old_color = self.pixels[r][c]
+                        self.pixels[r][c] = self.current_color
+                        action_pixels.append((r, c, old_color))
+                        self.draw_pixel(r, c, self.current_color)
 
-                    # Mirror horizontal
-                    if self.mirror_mode in ("HORIZONTAL", "BOTH"):
-                        mirror_c = self.cols - 1 - c
-                        if mirror_c != c:
-                            old_color_m = self.pixels[r][mirror_c]
-                            self.pixels[r][mirror_c] = self.current_color
-                            action_pixels.append((r, mirror_c, old_color_m))
-                            self.draw_pixel(r, mirror_c, self.current_color)
+                        # Mirror horizontal
+                        if self.mirror_mode in ("HORIZONTAL", "BOTH"):
+                            mirror_c = self.cols - 1 - c
+                            if mirror_c != c:
+                                old_color_m = self.pixels[r][mirror_c]
+                                self.pixels[r][mirror_c] = self.current_color
+                                action_pixels.append((r, mirror_c, old_color_m))
+                                self.draw_pixel(r, mirror_c, self.current_color)
 
-                    # Mirror vertical
-                    if self.mirror_mode in ("VERTICAL", "BOTH"):
-                        mirror_r = self.rows - 1 - r
-                        if mirror_r != r:
-                            old_color_m = self.pixels[mirror_r][c]
-                            self.pixels[mirror_r][c] = self.current_color
-                            action_pixels.append((mirror_r, c, old_color_m))
-                            self.draw_pixel(mirror_r, c, self.current_color)
+                        # Mirror vertical
+                        if self.mirror_mode in ("VERTICAL", "BOTH"):
+                            mirror_r = self.rows - 1 - r
+                            if mirror_r != r:
+                                old_color_m = self.pixels[mirror_r][c]
+                                self.pixels[mirror_r][c] = self.current_color
+                                action_pixels.append((mirror_r, c, old_color_m))
+                                self.draw_pixel(mirror_r, c, self.current_color)
 
-                    # Mirror ambos
-                    if self.mirror_mode == "BOTH":
-                        mirror_r = self.rows - 1 - r
-                        mirror_c = self.cols - 1 - c
-                        if mirror_r != r and mirror_c != c:
-                            old_color_m = self.pixels[mirror_r][mirror_c]
-                            self.pixels[mirror_r][mirror_c] = self.current_color
-                            action_pixels.append((mirror_r, mirror_c, old_color_m))
-                            self.draw_pixel(mirror_r, mirror_c, self.current_color)
+                        # Mirror ambos
+                        if self.mirror_mode == "BOTH":
+                            mirror_r = self.rows - 1 - r
+                            mirror_c = self.cols - 1 - c
+                            if mirror_r != r and mirror_c != c:
+                                old_color_m = self.pixels[mirror_r][mirror_c]
+                                self.pixels[mirror_r][mirror_c] = self.current_color
+                                action_pixels.append((mirror_r, mirror_c, old_color_m))
+                                self.draw_pixel(mirror_r, mirror_c, self.current_color)
 
-        if action_pixels:
-            self.undo_stack.append(action_pixels)
+            if action_pixels:
+                self.undo_stack.append(action_pixels)
 
     # ----------------------------
     # draw_temp_circle (preview)
@@ -767,8 +762,13 @@ class PixelEditor:
                     if preview:
                         x0, y0 = c * self.zoom, r * self.zoom
                         x1, y1 = x0 + self.zoom, y0 + self.zoom
-                        color = "#961a82" if fill else "#961a82"
-                        self.canvas.create_rectangle(x0, y0, x1, y1, fill=color, width=0, tags="temp_shape")
+                        self.canvas.create_rectangle(
+                            x0, y0, x1, y1,
+                            fill=self.color_preview_temp,  # CORPREVIEW
+                            outline=self.current_color if not fill else "",
+                            width=1,
+                            tags="temp_shape"
+                        )
                     else:
                         old_color = self.pixels[r][c]
                         self.pixels[r][c] = self.current_color
@@ -800,8 +800,15 @@ class PixelEditor:
                     if preview:
                         x0, y0 = c * self.zoom, r * self.zoom
                         x1, y1 = x0 + self.zoom, y0 + self.zoom
-                        color = "#961a82" if fill else "#961a82"
-                        self.canvas.create_rectangle(x0, y0, x1, y1, fill=color, width=0, tags="temp_shape")
+                        self.canvas.create_rectangle(
+                            x0, y0, x1, y1,
+                            fill=self.color_preview_temp,  # CORPREVIEW
+                            outline=self.current_color if not fill else "",
+                            width=1,
+                            tags="temp_shape"
+                        )
+
+
                     else:
                         old_color = self.pixels[r][c]
                         self.pixels[r][c] = self.current_color
