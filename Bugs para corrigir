@@ -1,2 +1,2 @@
 Próximos passos:
-Corrigir bug do Ctrl-Z (Desfazer) - Atualmente, ao apertar Ctrl-Z o desenho se apaga, mas ao desenhar novamente, ele se apaga e não conseguimos desenhar nada.
+Borracha - Ao usar a borracha, o fundo do canvas fica mais escuro (fundo branco fica cinza e o fundo cinza fica mais cinza)
