@@ -375,15 +375,17 @@ class PixelEditor:
             self.undo_stack.append(action_pixels)
 
     # -----------------------------
-    # Right Click Handlers (Sempre Borracha)
+    # Right Click Handlers atualizados
     # -----------------------------
     def right_click(self, event):
-        row, col = event.y // self.zoom, event.x // self.zoom
-        self.erase_pixel_action(row, col)
+        self.drawing = True
+        self.current_stroke = []  # inicia um novo stroke
+        self.erase_pixel(event.y // self.zoom, event.x // self.zoom)
 
     def right_drag(self, event):
-        row, col = event.y // self.zoom, event.x // self.zoom
-        self.erase_pixel_action(row, col)
+        if not self.drawing:
+            return
+        self.erase_pixel(event.y // self.zoom, event.x // self.zoom)
 
     def erase_pixel_action(self, row, col):
         if 0 <= row < self.rows and 0 <= col < self.cols:
@@ -399,23 +401,40 @@ class PixelEditor:
     # -----------------------------
     # Mirror Helper
     # -----------------------------
-    def apply_mirror(self, row, col):
+    # ---------------------------------
+    # Ajuste em apply_mirror para stroke contínuo
+    # ---------------------------------
+    def apply_mirror(self, row, col, stroke_list=None):
+        # Mirror horizontal
         if self.mirror_mode in ("HORIZONTAL", "BOTH"):
-            mirror_c = self.cols - 1 - col
-            old_color = self.pixels[row][mirror_c]
-            self.pixels[row][mirror_c] = self.current_color if self.tool != "eraser" else None
-            self.draw_pixel(row, mirror_c, self.pixels[row][mirror_c])
+            mc = self.cols - 1 - col
+            if mc != col:
+                old_color = self.pixels[row][mc]
+                self.pixels[row][mc] = self.current_color if self.tool != "eraser" else None
+                self.draw_pixel(row, mc, self.pixels[row][mc])
+                if stroke_list is not None:
+                    stroke_list.append((row, mc, old_color))
+
+        # Mirror vertical
         if self.mirror_mode in ("VERTICAL", "BOTH"):
-            mirror_r = self.rows - 1 - row
-            old_color = self.pixels[mirror_r][col]
-            self.pixels[mirror_r][col] = self.current_color if self.tool != "eraser" else None
-            self.draw_pixel(mirror_r, col, self.pixels[mirror_r][col])
+            mr = self.rows - 1 - row
+            if mr != row:
+                old_color = self.pixels[mr][col]
+                self.pixels[mr][col] = self.current_color if self.tool != "eraser" else None
+                self.draw_pixel(mr, col, self.pixels[mr][col])
+                if stroke_list is not None:
+                    stroke_list.append((mr, col, old_color))
+
+        # Mirror ambos
         if self.mirror_mode == "BOTH":
-            mirror_r = self.rows - 1 - row
-            mirror_c = self.cols - 1 - col
-            old_color = self.pixels[mirror_r][mirror_c]
-            self.pixels[mirror_r][mirror_c] = self.current_color if self.tool != "eraser" else None
-            self.draw_pixel(mirror_r, mirror_c, self.pixels[mirror_r][mirror_c])
+            mr = self.rows - 1 - row
+            mc = self.cols - 1 - col
+            if mr != row or mc != col:
+                old_color = self.pixels[mr][mc]
+                self.pixels[mr][mc] = self.current_color if self.tool != "eraser" else None
+                self.draw_pixel(mr, mc, self.pixels[mr][mc])
+                if stroke_list is not None:
+                    stroke_list.append((mr, mc, old_color))
 
     def start_paint(self, event):
         self.drawing = True
@@ -509,9 +528,19 @@ class PixelEditor:
             self.undo_stack.pop(0)
 
     def undo(self):
-        if self.undo_stack:
-            self.pixels = self.undo_stack.pop()
-            self.draw_grid()
+        if not self.undo_stack:
+            return  # nada a desfazer
+
+        last_action = self.undo_stack.pop()
+
+        for r, c, old_color in last_action:
+            # Restaura a matriz de pixels
+            self.pixels[r][c] = old_color
+            # Atualiza o canvas
+            self.draw_pixel(r, c, old_color)
+
+        # Limpa preview se houver
+        self.canvas.delete("temp_shape")
 
     def export(self):
         from PIL import Image
@@ -587,6 +616,9 @@ class PixelEditor:
         if filled:
             self.undo_stack.append(filled)
 
+    # ---------------------------------
+    # paint_pixel e erase_pixel atualizados
+    # ---------------------------------
     def paint_pixel(self, row, col):
         if 0 <= row < self.rows and 0 <= col < self.cols:
             old_color = self.pixels[row][col]
@@ -596,19 +628,18 @@ class PixelEditor:
                 self.current_stroke.append((row, col, old_color))
 
                 # Aplicar mirror
-                self.apply_mirror(row, col)
+                self.apply_mirror(row, col, stroke_list=self.current_stroke)
 
-    # Função para apagar um pixel mantendo o fundo quadriculado
     def erase_pixel(self, row, col):
         if 0 <= row < self.rows and 0 <= col < self.cols:
             old_color = self.pixels[row][col]
-            self.pixels[row][col] = None  # transparente / fundo quadriculado
+            if old_color is not None:
+                self.pixels[row][col] = None
+                self.draw_pixel(row, col, None)
+                self.current_stroke.append((row, col, old_color))
 
-            # redesenha o pixel corretamente
-            self.draw_pixel(row, col, None)
-
-            # adiciona à pilha de undo
-            self.current_stroke.append((row, col, old_color))
+                # Aplicar mirror
+                self.apply_mirror(row, col, stroke_list=self.current_stroke)
 
     def draw_action(self, event):
         if not self.drawing:
@@ -629,7 +660,9 @@ class PixelEditor:
             self.canvas.delete("temp_shape")
             self.draw_circle_generic(self.start_row, self.start_col, row, col, fill=False, preview=True)
 
-
+    # ---------------------------------
+    # stop_action atualizado
+    # ---------------------------------
     def stop_action(self, event):
         if not self.drawing:
             return
@@ -639,42 +672,32 @@ class PixelEditor:
         # Apaga o preview ao finalizar
         self.canvas.delete("temp_shape")
 
-        if self.tool == "rectangle":
+        if self.tool in ("pencil", "eraser", "fill") or event.num == 3:  # botão direito também
+            if hasattr(self, "current_stroke") and self.current_stroke:
+                self.undo_stack.append(self.current_stroke)
+                self.current_stroke = []
+
+        elif self.tool == "rectangle":
             self.draw_rectangle_generic(self.start_row, self.start_col, row, col, fill=False, preview=False)
         elif self.tool == "circle":
             self.draw_circle_generic(self.start_row, self.start_col, row, col, fill=False, preview=False)
-
         elif self.tool == "line":
             self.draw_line_generic(self.start_row, self.start_col, row, col, preview=False)
 
-
         self.start_row, self.start_col = None, None
-        self.current_stroke = []
 
-    def draw_rectangle_generic(self, start_row, start_col, end_row, end_col, fill=True, preview=False):
-        # Corrige coordenadas
+    def draw_rectangle_generic(self, start_row, start_col, end_row, end_col, preview=False, fill=False):
         r0, r1 = min(start_row, end_row), max(start_row, end_row)
         c0, c1 = min(start_col, end_col), max(start_col, end_col)
 
         if preview:
-            # Remove preview anterior
             self.canvas.delete("temp_shape")
-
             for r in range(r0, r1 + 1):
                 for c in range(c0, c1 + 1):
-                    # Se fill=False, desenha só a borda
                     if fill or r in (r0, r1) or c in (c0, c1):
-                        x0, y0 = c * self.zoom, r * self.zoom
-                        x1, y1 = x0 + self.zoom, y0 + self.zoom
-                        self.canvas.create_rectangle(
-                            x0, y0, x1, y1,
-                            fill=self.color_preview_temp, # CORPREVIEW
-                            outline=self.current_color if not fill else "",
-                            width=1,
-                            tags="temp_shape"
-                        )
+                        self._draw_pixel_canvas(r, c, self.current_color, preview=True)
+                        self._draw_mirror_preview(r, c)
         else:
-            # Desenho definitivo
             action_pixels = []
             for r in range(r0, r1 + 1):
                 for c in range(c0, c1 + 1):
@@ -683,34 +706,7 @@ class PixelEditor:
                         self.pixels[r][c] = self.current_color
                         action_pixels.append((r, c, old_color))
                         self.draw_pixel(r, c, self.current_color)
-
-                        # Mirror horizontal
-                        if self.mirror_mode in ("HORIZONTAL", "BOTH"):
-                            mirror_c = self.cols - 1 - c
-                            if mirror_c != c:
-                                old_color_m = self.pixels[r][mirror_c]
-                                self.pixels[r][mirror_c] = self.current_color
-                                action_pixels.append((r, mirror_c, old_color_m))
-                                self.draw_pixel(r, mirror_c, self.current_color)
-
-                        # Mirror vertical
-                        if self.mirror_mode in ("VERTICAL", "BOTH"):
-                            mirror_r = self.rows - 1 - r
-                            if mirror_r != r:
-                                old_color_m = self.pixels[mirror_r][c]
-                                self.pixels[mirror_r][c] = self.current_color
-                                action_pixels.append((mirror_r, c, old_color_m))
-                                self.draw_pixel(mirror_r, c, self.current_color)
-
-                        # Mirror ambos
-                        if self.mirror_mode == "BOTH":
-                            mirror_r = self.rows - 1 - r
-                            mirror_c = self.cols - 1 - c
-                            if mirror_r != r and mirror_c != c:
-                                old_color_m = self.pixels[mirror_r][mirror_c]
-                                self.pixels[mirror_r][mirror_c] = self.current_color
-                                action_pixels.append((mirror_r, mirror_c, old_color_m))
-                                self.draw_pixel(mirror_r, mirror_c, self.current_color)
+                        self._draw_mirror_pixels(r, c, action_pixels)
 
             if action_pixels:
                 self.undo_stack.append(action_pixels)
@@ -1006,7 +1002,6 @@ class PixelEditor:
         pixels = bresenham_line(start_col, start_row, end_col, end_row)
 
         if preview:
-            # Remove preview anterior
             self.canvas.delete("temp_shape")
             for c, r in pixels:
                 if 0 <= r < self.rows and 0 <= c < self.cols:
@@ -1124,5 +1119,3 @@ if __name__ == "__main__":
     root.bind("<Button-5>", on_mouse_wheel)    # Linux scroll down
 
     root.mainloop()
-
-
