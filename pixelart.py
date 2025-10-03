@@ -1,9 +1,9 @@
 import tkinter as tk
 
-from tkinter import colorchooser, filedialog
+from tkinter import colorchooser
 from tkinter.colorchooser import askcolor
 
-from PIL import Image
+
 
 
 def bresenham_line(x0, y0, x1, y1):
@@ -30,6 +30,8 @@ def bresenham_line(x0, y0, x1, y1):
 
 class PixelEditor:
     def __init__(self, master, cols=32, rows=32, zoom=16):
+        self.current_tool = None
+        self.mirror_button = None
         self.master = master
         self.cols = cols
         self.rows = rows
@@ -71,7 +73,7 @@ class PixelEditor:
 
         # Toolbar esquerda
         self.controls = tk.Frame(self.main_frame, width=200)
-        self.controls.pack(side=tk.LEFT, fill="y", padx=4, pady=4)
+        self.controls.pack(side="left", fill="y", padx=4, pady=4)
 
         # Barra de ferramentas
         self.tools_frame = tk.Frame(self.controls)
@@ -89,8 +91,8 @@ class PixelEditor:
         self.zoom_frame = tk.Frame(self.controls)
         self.zoom_frame.pack(pady=2)
 
-        tk.Button(self.zoom_frame, text="🔍 +", command=self.zoom_in).pack(side=tk.LEFT, pady=2, fill="x")
-        tk.Button(self.zoom_frame, text="🔍 -", command=self.zoom_out).pack(side=tk.LEFT,pady=2, fill="x")
+        tk.Button(self.zoom_frame, text="🔍 +", command=self.zoom_in).pack(side="left", pady=2, fill="x")
+        tk.Button(self.zoom_frame, text="🔍 -", command=self.zoom_out).pack(side="left",pady=2, fill="x")
 
         tk.Button(self.controls, text="Grade on/off", command=self.toggle_grid).pack(pady=4, fill='x')
         tk.Button(self.controls, text="Fundo xadrez on/off", command=self.toggle_checker).pack(pady=4, fill='x')
@@ -110,7 +112,7 @@ class PixelEditor:
         # Canvas (centro)
         self.canvas = tk.Canvas(self.main_frame, width=self.cols * self.zoom,
                                 height=self.rows * self.zoom, bg=self.bg_color)
-        self.canvas.pack(side=tk.LEFT, padx=4, pady=4, expand=True)
+        self.canvas.pack(side="left", padx=4, pady=4, expand=True)
 
         self.canvas.bind("<Alt-Button-1>", self.alt_picker)
 
@@ -125,7 +127,7 @@ class PixelEditor:
 
         # Frame direito para paleta e futuros controles
         self.right_frame = tk.Frame(self.main_frame)
-        self.right_frame.pack(side=tk.LEFT, fill="y", padx=4, pady=4)
+        self.right_frame.pack(side="left", fill="y", padx=4, pady=4)
 
         # Botão para adicionar cores
         tk.Button(self.right_frame, text="Adicionar Cor", command=self.add_color).pack(pady=4, fill='x')
@@ -152,15 +154,15 @@ class PixelEditor:
         # Botões de mirror no right_frame
         self.mirror_h_button = tk.Button(self.mirror_frame, text="H", width=8,
                                          command=lambda: self.set_mirror("HORIZONTAL"))
-        self.mirror_h_button.pack(side=tk.LEFT, pady=2, fill="x")
+        self.mirror_h_button.pack(side="left", pady=2, fill="x")
 
         self.mirror_v_button = tk.Button(self.mirror_frame, text="V", width=8,
                                          command=lambda: self.set_mirror("VERTICAL"))
-        self.mirror_v_button.pack(side=tk.LEFT, pady=2, fill="x")
+        self.mirror_v_button.pack(side="left", pady=2, fill="x")
 
         self.mirror_both_button = tk.Button(self.mirror_frame, text="H+V", width=8,
                                             command=lambda: self.set_mirror("BOTH"))
-        self.mirror_both_button.pack(side=tk.LEFT, pady=2,)
+        self.mirror_both_button.pack(side="left", pady=2,)
 
     # Alt+click = picker
     def alt_picker(self, event):
@@ -542,13 +544,12 @@ class PixelEditor:
             self.current_stroke = []
             self.erase_pixel(row, col)
         elif self.tool in ("rectangle", "circle", "line"):
-            # preview vai lidar no draw_action
+            # preview será tratado no draw_action
             pass
         elif self.tool == "fill":
             self.current_stroke = []
             self.fill_pixel(row, col)
         elif self.tool == "picker":
-            row, col = event.y // self.zoom, event.x // self.zoom
             if 0 <= row < self.rows and 0 <= col < self.cols:
                 color = self.pixels[row][col]
                 if color:
@@ -593,16 +594,17 @@ class PixelEditor:
                 # Aplicar mirror
                 self.apply_mirror(row, col)
 
+    # Função para apagar um pixel mantendo o fundo quadriculado
     def erase_pixel(self, row, col):
         if 0 <= row < self.rows and 0 <= col < self.cols:
             old_color = self.pixels[row][col]
-            if old_color is not None:
-                self.pixels[row][col] = None
-                self.draw_pixel(row, col, self.bg_color)
-                self.current_stroke.append((row, col, old_color))
+            self.pixels[row][col] = None  # transparente / fundo quadriculado
 
-                # Aplicar mirror
-                self.apply_mirror(row, col)
+            # redesenha o pixel corretamente
+            self.draw_pixel(row, col, None)
+
+            # adiciona à pilha de undo
+            self.current_stroke.append((row, col, old_color))
 
     def draw_action(self, event):
         if not self.drawing:
@@ -613,20 +615,24 @@ class PixelEditor:
             self.paint_pixel(row, col)
         elif self.tool == "eraser":
             self.erase_pixel(row, col)
-        elif self.tool == "rectangle":
-            self.draw_temp_rectangle(event)
-        elif self.tool == "circle":
-            self.draw_temp_circle(event)
         elif self.tool == "line":
-            self.draw_temp_line(event)
-
-         # fill não tem preview
+            self.canvas.delete("temp_shape")
+            self.draw_temp_line(self.start_row, self.start_col, row, col)
+        elif self.tool == "rectangle":
+            self.canvas.delete("temp_shape")
+            self.draw_temp_rectangle(self.start_row, self.start_col, row, col)
+        elif self.tool == "circle":
+            self.canvas.delete("temp_shape")
+            self.draw_temp_circle(self.start_row, self.start_col, row, col, fill=False)
 
     def stop_action(self, event):
         if not self.drawing:
             return
         self.drawing = False
         row, col = event.y // self.zoom, event.x // self.zoom
+
+        # Apaga o preview ao finalizar
+        self.canvas.delete("temp_shape")
 
         if self.tool == "rectangle":
             self.draw_rectangle(self.start_row, self.start_col, row, col)
@@ -708,29 +714,115 @@ class PixelEditor:
         if action_pixels:
             self.undo_stack.append(action_pixels)
 
-    def draw_temp_circle(self, event):
-        if self.start_row is None or self.start_col is None:
-            return
-
-        # Remove preview anterior
+    # ----------------------------
+    # draw_temp_circle (preview)
+    # ----------------------------
+    def draw_temp_circle(self, start_row, start_col, end_row, end_col, fill=True):
         self.canvas.delete("temp_shape")
 
-        r0, c0 = self.start_row, self.start_col
-        r1, c1 = event.y // self.zoom, event.x // self.zoom
+        r0, r1 = min(start_row, end_row), max(start_row, end_row)
+        c0, c1 = min(start_col, end_col), max(start_col, end_col)
 
-        # Corrige para sempre ter r0 < r1 e c0 < c1
-        r0, r1 = min(r0, r1), max(r0, r1)
-        c0, c1 = min(c0, c1), max(c0, c1)
+        rx = max(1, (c1 - c0) // 2)
+        ry = max(1, (r1 - r0) // 2)
 
-        # Desenha elipse temporária (apenas borda)
-        x1, y1 = c0 * self.zoom, r0 * self.zoom
-        x2, y2 = (c1 + 1) * self.zoom, (r1 + 1) * self.zoom
-        self.canvas.create_oval(
-            x1, y1, x2, y2,
-            outline=self.current_color,
-            width=1,
-            tags="temp_shape"
-        )
+        cx = c0 + rx
+        cy = r0 + ry
+
+        # tolerância adaptativa para borda
+        tolerance = max(0.3, 1 / max(rx, ry))
+
+        for r in range(r0, r1 + 1):
+            for c in range(c0, c1 + 1):
+                dist = ((c - cx) ** 2) / (rx ** 2) + ((r - cy) ** 2) / (ry ** 2)
+                if fill:
+                    if dist <= 1:
+                        x0, y0 = c * self.zoom, r * self.zoom
+                        x1, y1 = x0 + self.zoom, y0 + self.zoom
+                        self.canvas.create_rectangle(
+                            x0, y0, x1, y1,
+                            fill="#961a82",
+                            width=0,
+                            tags="temp_shape"
+                        )
+                else:
+                    if 1 - tolerance <= dist <= 1 + tolerance:
+                        x0, y0 = c * self.zoom, r * self.zoom
+                        x1, y1 = x0 + self.zoom, y0 + self.zoom
+                        self.canvas.create_rectangle(
+                            x0, y0, x1, y1,
+                            fill="#961a82",
+                            width=0,
+                            tags="temp_shape"
+                        )
+
+    def draw_temp_circle_filled(self, start_row, start_col, end_row, end_col):
+        self.canvas.delete("temp_shape")
+
+        r0, r1 = min(start_row, end_row), max(start_row, end_row)
+        c0, c1 = min(start_col, end_col), max(start_col, end_col)
+
+        rx = (c1 - c0) // 2
+        ry = (r1 - r0) // 2
+        if rx == 0 or ry == 0:
+            return
+
+        cx = c0 + rx
+        cy = r0 + ry
+
+        for r in range(r0, r1 + 1):
+            for c in range(c0, c1 + 1):
+                # Checa se o ponto (r,c) está dentro da elipse
+                if ((c - cx) ** 2) / (rx ** 2) + ((r - cy) ** 2) / (ry ** 2) <= 1:
+                    x0, y0 = c * self.zoom, r * self.zoom
+                    x1, y1 = x0 + self.zoom, y0 + self.zoom
+                    self.canvas.create_rectangle(
+                        x0, y0, x1, y1,
+                        fill="#961a82",
+                        width=0,
+                        tags="temp_shape"
+                    )
+
+    def drag_action(self, event):
+        row, col = event.y // self.zoom, event.x // self.zoom
+
+        if self.current_tool == "LINE":
+            self.draw_temp_line(event)
+
+        elif self.current_tool == "RECTANGLE":
+            self.draw_temp_rectangle(event)
+
+        elif self.current_tool == "CIRCLE":
+            self.draw_temp_circle(event)
+
+        elif self.current_tool == "PENCIL":
+            self.paint_pixel(row, col)
+
+        elif self.current_tool == "ERASER":
+            self.erase_pixel(row, col)
+
+    def calculate_circle_pixels(self, row0, col0, row1, col1):
+        pixels = []
+        radius = int(((row1 - row0) ** 2 + (col1 - col0) ** 2) ** 0.5)
+        x0, y0 = col0, row0
+        x, y = radius, 0
+        d = 1 - radius
+
+        while x >= y:
+            pts = [
+                (y0 + y, x0 + x), (y0 + y, x0 - x),
+                (y0 - y, x0 + x), (y0 - y, x0 - x),
+                (y0 + x, x0 + y), (y0 + x, x0 - y),
+                (y0 - x, x0 + y), (y0 - x, x0 - y),
+            ]
+            pixels.extend(pts)
+            y += 1
+            if d <= 0:
+                d += 2 * y + 1
+            else:
+                x -= 1
+                d += 2 * (y - x) + 1
+        return [(r, c) for r, c in pixels if 0 <= r < self.rows and 0 <= c < self.cols]
 
     def draw_circle(self, start_row, start_col, end_row, end_col):
         # Determina o retângulo que envolve o círculo
