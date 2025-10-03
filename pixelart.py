@@ -686,30 +686,49 @@ class PixelEditor:
 
         self.start_row, self.start_col = None, None
 
-    def draw_rectangle_generic(self, start_row, start_col, end_row, end_col, preview=False, fill=False):
+    def draw_rectangle_generic(self, start_row, start_col, end_row, end_col, fill=True, preview=False):
         r0, r1 = min(start_row, end_row), max(start_row, end_row)
         c0, c1 = min(start_col, end_col), max(start_col, end_col)
 
-        if preview:
-            self.canvas.delete("temp_shape")
-            for r in range(r0, r1 + 1):
-                for c in range(c0, c1 + 1):
-                    if fill or r in (r0, r1) or c in (c0, c1):
-                        self._draw_pixel_canvas(r, c, self.current_color, preview=True)
-                        self._draw_mirror_preview(r, c)
-        else:
-            action_pixels = []
-            for r in range(r0, r1 + 1):
-                for c in range(c0, c1 + 1):
-                    if fill or r in (r0, r1) or c in (c0, c1):
-                        old_color = self.pixels[r][c]
-                        self.pixels[r][c] = self.current_color
-                        action_pixels.append((r, c, old_color))
-                        self.draw_pixel(r, c, self.current_color)
-                        self._draw_mirror_pixels(r, c, action_pixels)
+        action_pixels = []
+        pixels_set = set()
 
-            if action_pixels:
-                self.undo_stack.append(action_pixels)
+        def draw_pixel_safe(r, c):
+            if 0 <= r < self.rows and 0 <= c < self.cols:
+                key = (r, c)
+                if key not in pixels_set:
+                    old_color = self.pixels[r][c]
+                    self.pixels[r][c] = self.current_color
+                    action_pixels.append((r, c, old_color))
+                    self.draw_pixel(r, c, self.current_color)
+                    pixels_set.add(key)
+
+        for r in range(r0, r1 + 1):
+            for c in range(c0, c1 + 1):
+                if fill or r in (r0, r1) or c in (c0, c1):
+                    if preview:
+                        x0, y0 = c * self.zoom, r * self.zoom
+                        x1, y1 = x0 + self.zoom, y0 + self.zoom
+                        self.canvas.create_rectangle(
+                            x0, y0, x1, y1,
+                            fill=self.color_preview_temp,
+                            outline=self.current_color if not fill else "",
+                            width=1,
+                            tags="temp_shape"
+                        )
+                    else:
+                        draw_pixel_safe(r, c)
+
+                        # Mirrors
+                        if self.mirror_mode in ("HORIZONTAL", "BOTH"):
+                            draw_pixel_safe(r, self.cols - 1 - c)
+                        if self.mirror_mode in ("VERTICAL", "BOTH"):
+                            draw_pixel_safe(self.rows - 1 - r, c)
+                        if self.mirror_mode == "BOTH":
+                            draw_pixel_safe(self.rows - 1 - r, self.cols - 1 - c)
+
+        if not preview and action_pixels:
+            self.undo_stack.append(action_pixels)
 
     # ----------------------------
     # draw_temp_circle (preview)
@@ -736,6 +755,18 @@ class PixelEditor:
         cy = r0 + ry
 
         action_pixels = []  # só usado se preview=False
+        pixels_set = set()  # para evitar duplicatas
+
+        # Função auxiliar para desenhar um pixel e registrar no undo
+        def draw_pixel_safe(r, c):
+            if 0 <= r < self.rows and 0 <= c < self.cols:
+                key = (r, c)
+                if key not in pixels_set:
+                    old_color = self.pixels[r][c]
+                    self.pixels[r][c] = self.current_color
+                    action_pixels.append((r, c, old_color))
+                    self.draw_pixel(r, c, self.current_color)
+                    pixels_set.add(key)
 
         # Bresenham adaptado para elipse
         x = 0
@@ -755,23 +786,27 @@ class PixelEditor:
                 (cy - y, cx - x)
             ]
             for r, c in points:
-                if 0 <= r < self.rows and 0 <= c < self.cols:
-                    if preview:
-                        x0, y0 = c * self.zoom, r * self.zoom
-                        x1, y1 = x0 + self.zoom, y0 + self.zoom
-                        self.canvas.create_rectangle(
-                            x0, y0, x1, y1,
-                            fill=self.color_preview_temp,  # CORPREVIEW
-                            outline=self.current_color if not fill else "",
-                            width=1,
-                            tags="temp_shape"
-                        )
-                    else:
-                        old_color = self.pixels[r][c]
-                        self.pixels[r][c] = self.current_color
-                        action_pixels.append((r, c, old_color))
-                        self.draw_pixel(r, c, self.current_color)
-                        self.apply_mirror(r, c)
+                if preview:
+                    x0, y0 = c * self.zoom, r * self.zoom
+                    x1, y1 = x0 + self.zoom, y0 + self.zoom
+                    self.canvas.create_rectangle(
+                        x0, y0, x1, y1,
+                        fill=self.color_preview_temp,
+                        outline=self.current_color if not fill else "",
+                        width=1,
+                        tags="temp_shape"
+                    )
+                else:
+                    draw_pixel_safe(r, c)
+
+                    # Mirrors
+                    if self.mirror_mode in ("HORIZONTAL", "BOTH"):
+                        draw_pixel_safe(r, self.cols - 1 - c)
+                    if self.mirror_mode in ("VERTICAL", "BOTH"):
+                        draw_pixel_safe(self.rows - 1 - r, c)
+                    if self.mirror_mode == "BOTH":
+                        draw_pixel_safe(self.rows - 1 - r, self.cols - 1 - c)
+
             if d1 < 0:
                 x += 1
                 dx += 2 * ry_sq
@@ -793,25 +828,27 @@ class PixelEditor:
                 (cy - y, cx - x)
             ]
             for r, c in points:
-                if 0 <= r < self.rows and 0 <= c < self.cols:
-                    if preview:
-                        x0, y0 = c * self.zoom, r * self.zoom
-                        x1, y1 = x0 + self.zoom, y0 + self.zoom
-                        self.canvas.create_rectangle(
-                            x0, y0, x1, y1,
-                            fill=self.color_preview_temp,  # CORPREVIEW
-                            outline=self.current_color if not fill else "",
-                            width=1,
-                            tags="temp_shape"
-                        )
+                if preview:
+                    x0, y0 = c * self.zoom, r * self.zoom
+                    x1, y1 = x0 + self.zoom, y0 + self.zoom
+                    self.canvas.create_rectangle(
+                        x0, y0, x1, y1,
+                        fill=self.color_preview_temp,
+                        outline=self.current_color if not fill else "",
+                        width=1,
+                        tags="temp_shape"
+                    )
+                else:
+                    draw_pixel_safe(r, c)
 
+                    # Mirrors
+                    if self.mirror_mode in ("HORIZONTAL", "BOTH"):
+                        draw_pixel_safe(r, self.cols - 1 - c)
+                    if self.mirror_mode in ("VERTICAL", "BOTH"):
+                        draw_pixel_safe(self.rows - 1 - r, c)
+                    if self.mirror_mode == "BOTH":
+                        draw_pixel_safe(self.rows - 1 - r, self.cols - 1 - c)
 
-                    else:
-                        old_color = self.pixels[r][c]
-                        self.pixels[r][c] = self.current_color
-                        action_pixels.append((r, c, old_color))
-                        self.draw_pixel(r, c, self.current_color)
-                        self.apply_mirror(r, c)
             if d2 > 0:
                 y -= 1
                 dy -= 2 * rx_sq
@@ -825,7 +862,6 @@ class PixelEditor:
 
         if not preview and action_pixels:
             self.undo_stack.append(action_pixels)
-
 
     def drag_action(self, event):
         row, col = event.y // self.zoom, event.x // self.zoom
@@ -947,78 +983,111 @@ class PixelEditor:
         self.draw_palette()
 
     # BUCKET
-    def fill_bucket(self, row, col):
-        target_color = self.pixels[row][col]
-        new_color = self.current_color
-        if target_color == new_color:
+    def fill_bucket_generic(self, start_row, start_col, preview=False):
+        target_color = self.pixels[start_row][start_col]
+        if target_color == self.current_color:
             return
 
-        stack = [(row, col)]
         action_pixels = []
+        pixels_set = set()
+        stack = [(start_row, start_col)]
 
-        while stack:
-            r, c = stack.pop()
-            if r < 0 or r >= self.rows or c < 0 or c >= self.cols:
-                continue
-            if self.pixels[r][c] != target_color:
-                continue
-
-            self.pixels[r][c] = new_color
-            action_pixels.append((r, c, target_color))
-            self.draw_pixel(r, c, new_color)
-
-            # Adiciona vizinhos
-            stack.extend([(r + 1, c), (r - 1, c), (r, c + 1), (r, c - 1)])
-
-            # Mirror
-            if self.mirror_mode in ("HORIZONTAL", "BOTH"):
-                mirror_c = self.cols - 1 - c
-                if self.pixels[r][mirror_c] == target_color:
-                    self.pixels[r][mirror_c] = new_color
-                    action_pixels.append((r, mirror_c, target_color))
-                    self.draw_pixel(r, mirror_c, new_color)
-                    stack.append((r, mirror_c))
-            if self.mirror_mode in ("VERTICAL", "BOTH"):
-                mirror_r = self.rows - 1 - r
-                if self.pixels[mirror_r][c] == target_color:
-                    self.pixels[mirror_r][c] = new_color
-                    action_pixels.append((mirror_r, c, target_color))
-                    self.draw_pixel(mirror_r, c, new_color)
-                    stack.append((mirror_r, c))
-            if self.mirror_mode == "BOTH":
-                mirror_r = self.rows - 1 - r
-                mirror_c = self.cols - 1 - c
-                if self.pixels[mirror_r][mirror_c] == target_color:
-                    self.pixels[mirror_r][mirror_c] = new_color
-                    action_pixels.append((mirror_r, mirror_c, target_color))
-                    self.draw_pixel(mirror_r, mirror_c, new_color)
-                    stack.append((mirror_r, mirror_c))
-
-        if action_pixels:
-            self.undo_stack.append(action_pixels)
-
-    # Desenha linha
-    def draw_line_generic(self, start_row, start_col, end_row, end_col, preview=False):
-        pixels = bresenham_line(start_col, start_row, end_col, end_row)
-
-        if preview:
-            self.canvas.delete("temp_shape")
-            for c, r in pixels:
-                if 0 <= r < self.rows and 0 <= c < self.cols:
-                    self._draw_pixel_canvas(r, c, self.current_color, preview=True)
-                    self._draw_mirror_preview(r, c)
-        else:
-            action_pixels = []
-            for c, r in pixels:
-                if 0 <= r < self.rows and 0 <= c < self.cols:
+        def draw_pixel_safe(r, c):
+            if 0 <= r < self.rows and 0 <= c < self.cols:
+                key = (r, c)
+                if key not in pixels_set:
                     old_color = self.pixels[r][c]
                     self.pixels[r][c] = self.current_color
                     action_pixels.append((r, c, old_color))
                     self.draw_pixel(r, c, self.current_color)
-                    self._draw_mirror_pixels(r, c, action_pixels)
+                    pixels_set.add(key)
 
-            if action_pixels:
-                self.undo_stack.append(action_pixels)
+        while stack:
+            r, c = stack.pop()
+            if self.pixels[r][c] != target_color:
+                continue
+
+            if preview:
+                x0, y0 = c * self.zoom, r * self.zoom
+                x1, y1 = x0 + self.zoom, y0 + self.zoom
+                self.canvas.create_rectangle(
+                    x0, y0, x1, y1,
+                    fill=self.color_preview_temp,
+                    outline=self.current_color,
+                    width=1,
+                    tags="temp_shape"
+                )
+            else:
+                draw_pixel_safe(r, c)
+                if self.mirror_mode in ("HORIZONTAL", "BOTH"):
+                    draw_pixel_safe(r, self.cols - 1 - c)
+                if self.mirror_mode in ("VERTICAL", "BOTH"):
+                    draw_pixel_safe(self.rows - 1 - r, c)
+                if self.mirror_mode == "BOTH":
+                    draw_pixel_safe(self.rows - 1 - r, self.cols - 1 - c)
+
+            # Adiciona vizinhos
+            for nr, nc in [(r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]:
+                if 0 <= nr < self.rows and 0 <= nc < self.cols and self.pixels[nr][nc] == target_color:
+                    stack.append((nr, nc))
+
+        if not preview and action_pixels:
+            self.undo_stack.append(action_pixels)
+
+    # Desenha linha
+    def draw_line_generic(self, start_row, start_col, end_row, end_col, preview=False):
+        action_pixels = []
+        pixels_set = set()
+
+        def draw_pixel_safe(r, c):
+            if 0 <= r < self.rows and 0 <= c < self.cols:
+                key = (r, c)
+                if key not in pixels_set:
+                    old_color = self.pixels[r][c]
+                    self.pixels[r][c] = self.current_color
+                    action_pixels.append((r, c, old_color))
+                    self.draw_pixel(r, c, self.current_color)
+                    pixels_set.add(key)
+
+        r0, c0, r1, c1 = start_row, start_col, end_row, end_col
+        dr = abs(r1 - r0)
+        dc = abs(c1 - c0)
+        sr = 1 if r0 < r1 else -1
+        sc = 1 if c0 < c1 else -1
+        err = dr - dc
+
+        while True:
+            if preview:
+                x0, y0 = c0 * self.zoom, r0 * self.zoom
+                x1, y1 = x0 + self.zoom, y0 + self.zoom
+                self.canvas.create_rectangle(
+                    x0, y0, x1, y1,
+                    fill=self.color_preview_temp,
+                    outline=self.current_color,
+                    width=1,
+                    tags="temp_shape"
+                )
+            else:
+                draw_pixel_safe(r0, c0)
+                if self.mirror_mode in ("HORIZONTAL", "BOTH"):
+                    draw_pixel_safe(r0, self.cols - 1 - c0)
+                if self.mirror_mode in ("VERTICAL", "BOTH"):
+                    draw_pixel_safe(self.rows - 1 - r0, c0)
+                if self.mirror_mode == "BOTH":
+                    draw_pixel_safe(self.rows - 1 - r0, self.cols - 1 - c0)
+
+            if r0 == r1 and c0 == c1:
+                break
+            e2 = 2 * err
+            if e2 > -dc:
+                err -= dc
+                r0 += sr
+            if e2 < dr:
+                err += dr
+                c0 += sc
+
+        if not preview and action_pixels:
+            self.undo_stack.append(action_pixels)
 
     # Função auxiliar para preview de pixels
     def _draw_pixel_canvas(self, r, c, color, preview=False, fill=False):
