@@ -40,6 +40,7 @@ class PixelEditor:
 
         # self.zoom = pixel_size
         self.current_color = "#000000"
+        self.secondary_color = "#808080"  # cor secundária padrão (cinza neutro)
         self.bg_color = "#ffffff"
         self.tool = "pencil"
 
@@ -241,6 +242,8 @@ class PixelEditor:
                 )
                 # clique com botão direito para remover
                 btn.bind("<Button-3>", lambda e, idx=i: self.remove_color(idx))
+                btn.bind("<Shift-Button-1>", lambda e, color=color: (self.select_secondary_color(color), "break")[1])
+
 
                 if color == getattr(self, "selected_color", None):
                     btn.config(highlightthickness=8, highlightbackground="black", bd=2)
@@ -256,6 +259,10 @@ class PixelEditor:
         self.current_color = color
         self.selected_color = color
         self.draw_palette()
+
+    def select_secondary_color(self, color):
+        self.secondary_color = color
+        print(f"Cor secundária definida: {color}")
 
     def update_palette_indicator(self):
         for btn in self.palette_buttons:
@@ -337,66 +344,25 @@ class PixelEditor:
                                     self.cols * self.zoom, self.rows * self.zoom // 2,
                                     fill="red", width=2)
 
-    def paint(self, event):
-        row, col = event.y // self.zoom, event.x // self.zoom
-        if row < 0 or row >= self.rows or col < 0 or col >= self.cols:
-            return
-
-        if self.tool == "pencil":
-            self.draw_pixel_action(row, col)
-        elif self.tool == "eraser":
-            self.erase_pixel_action(row, col)
-        elif self.tool == "fill":
-            self.fill_bucket(row, col)
-
-    def draw_pixel_action(self, row, col):
-        if 0 <= row < self.rows and 0 <= col < self.cols:
-            pixels_to_draw = [(row, col)]
-
-            # Mirror
-            if self.mirror_mode in ("HORIZONTAL", "BOTH"):
-                mirror_c = self.cols - 1 - col
-                pixels_to_draw.append((row, mirror_c))
-            if self.mirror_mode in ("VERTICAL", "BOTH"):
-                mirror_r = self.rows - 1 - row
-                pixels_to_draw.append((mirror_r, col))
-            if self.mirror_mode == "BOTH":
-                mirror_r = self.rows - 1 - row
-                mirror_c = self.cols - 1 - col
-                pixels_to_draw.append((mirror_r, mirror_c))
-
-            action_pixels = []
-            for r, c in pixels_to_draw:
-                old_color = self.pixels[r][c]
-                self.pixels[r][c] = self.current_color
-                action_pixels.append((r, c, old_color))
-                self.draw_pixel(r, c, self.current_color)
-
-            self.undo_stack.append(action_pixels)
-
     # -----------------------------
-    # Right Click Handlers atualizados
+    # Right Click Handlers corrigidos
     # -----------------------------
+
     def right_click(self, event):
+        """Botão direito usa cor secundária."""
         self.drawing = True
-        self.current_stroke = []  # inicia um novo stroke
-        self.erase_pixel(event.y // self.zoom, event.x // self.zoom)
+        row, col = event.y // self.zoom, event.x // self.zoom
+        self.current_stroke = []
+        self.paint_pixel_with_color(row, col, self.secondary_color)
 
     def right_drag(self, event):
+        """Arrastar com o botão direito também pinta com a cor secundária."""
         if not self.drawing:
             return
-        self.erase_pixel(event.y // self.zoom, event.x // self.zoom)
+        row, col = event.y // self.zoom, event.x // self.zoom
+        self.paint_pixel_with_color(row, col, self.secondary_color)
 
-    def erase_pixel_action(self, row, col):
-        if 0 <= row < self.rows and 0 <= col < self.cols:
-            old_color = self.pixels[row][col]
-            if old_color is not None:
-                self.pixels[row][col] = None
-                self.draw_pixel(row, col, None)
-                # Mirror para botão direito
-                self.apply_mirror(row, col)
-                # Undo por stroke
-                self.undo_stack.append([(row, col, old_color)])
+
 
     # -----------------------------
     # Mirror Helper
@@ -436,76 +402,9 @@ class PixelEditor:
                 if stroke_list is not None:
                     stroke_list.append((mr, mc, old_color))
 
-    def start_paint(self, event):
-        self.drawing = True
-        self.save_state()  # salva antes de começar a desenhar
-        self.paint(event)
-
-    def start_erase(self, event):
-        self.drawing = True
-        self.save_state() # salva o estado antes de apagar
-        self.erase(event)
-
-    def stop_paint(self, event):
-        self.drawing = False
-
-    def erase(self, event):
-
-        if not self.drawing:
-            return
-        c, r = event.x // self.zoom, event.y // self.zoom
-        if 0 <= c < self.cols and 0 <= r < self.rows:
-            self.pixels[r][c] = None
-
-            # Mirror horizontal
-            if self.mirror_mode in ("HORIZONTAL", "BOTH"):
-                mirror_c = self.cols - 1 - c
-                if mirror_c != c:
-                    self.pixels[r][mirror_c] = None
-
-            # Mirror vertical
-            if self.mirror_mode in ("VERTICAL", "BOTH"):
-                mirror_r = self.rows - 1 - r
-                if mirror_r != r:
-                    self.pixels[mirror_r][c] = None
-
-            # Mirror ambos
-            if self.mirror_mode == "BOTH":
-                mirror_c = self.cols - 1 - c
-                mirror_r = self.rows - 1 - r
-                if mirror_c != c and mirror_r != r:
-                    self.pixels[mirror_r][mirror_c] = None
-
-            self.draw_grid()
-
-    def flood_fill(self, r, c, target, replacement):
-        if target == replacement:
-            return
-        stack = [(r, c)]
-        while stack:
-            r, c = stack.pop()
-            if 0 <= r < self.rows and 0 <= c < self.cols:
-                if self.pixels[r][c] == target:
-                    self.pixels[r][c] = replacement
-                    stack.extend([(r+1, c), (r-1, c), (r, c+1), (r, c-1)])
-
     def toggle_grid(self):
         self.show_grid = not self.show_grid
         self.draw_grid()
-
-    def toggle_mirror(self):
-        if self.mirror_mode == "OFF":
-            self.mirror_mode = "HORIZONTAL"
-            self.mirror_button.config(text="Mirror: H", bg="#a0c0ff")
-        elif self.mirror_mode == "HORIZONTAL":
-            self.mirror_mode = "VERTICAL"
-            self.mirror_button.config(text="Mirror: V", bg="#a0c0ff")
-        elif self.mirror_mode == "VERTICAL":
-            self.mirror_mode = "BOTH"
-            self.mirror_button.config(text="Mirror: H+V", bg="#a0c0ff")
-        else:
-            self.mirror_mode = "OFF"
-            self.mirror_button.config(text="Mirror OFF", bg="SystemButtonFace")
 
     def toggle_checker(self):
         self.show_checker = not self.show_checker
@@ -629,6 +528,41 @@ class PixelEditor:
 
                 # Aplicar mirror
                 self.apply_mirror(row, col, stroke_list=self.current_stroke)
+
+    def paint_pixel_with_color(self, row, col, color):
+        """Desenha pixel com cor específica (para botão direito)."""
+        if 0 <= row < self.rows and 0 <= col < self.cols:
+            old_color = self.pixels[row][col]
+            if old_color != color:
+                self.pixels[row][col] = color
+                self.draw_pixel(row, col, color)
+                self.current_stroke.append((row, col, old_color))
+
+                # Aplicar espelhamento
+                if self.mirror_mode in ("HORIZONTAL", "BOTH"):
+                    mc = self.cols - 1 - col
+                    if mc != col:
+                        old_color_m = self.pixels[row][mc]
+                        self.pixels[row][mc] = color
+                        self.draw_pixel(row, mc, color)
+                        self.current_stroke.append((row, mc, old_color_m))
+
+                if self.mirror_mode in ("VERTICAL", "BOTH"):
+                    mr = self.rows - 1 - row
+                    if mr != row:
+                        old_color_m = self.pixels[mr][col]
+                        self.pixels[mr][col] = color
+                        self.draw_pixel(mr, col, color)
+                        self.current_stroke.append((mr, col, old_color_m))
+
+                if self.mirror_mode == "BOTH":
+                    mr = self.rows - 1 - row
+                    mc = self.cols - 1 - col
+                    if mr != row or mc != col:
+                        old_color_m = self.pixels[mr][mc]
+                        self.pixels[mr][mc] = color
+                        self.draw_pixel(mr, mc, color)
+                        self.current_stroke.append((mr, mc, old_color_m))
 
     def erase_pixel(self, row, col):
         if 0 <= row < self.rows and 0 <= col < self.cols:
@@ -863,31 +797,6 @@ class PixelEditor:
         elif self.current_tool == "ERASER":
             self.erase_pixel(row, col)
 
-    def calculate_circle_pixels(self, row0, col0, row1, col1):
-        pixels = []
-        radius = int(((row1 - row0) ** 2 + (col1 - col0) ** 2) ** 0.5)
-        x0, y0 = col0, row0
-        x, y = radius, 0
-        d = 1 - radius
-
-        while x >= y:
-            pts = [
-                (y0 + y, x0 + x), (y0 + y, x0 - x),
-                (y0 - y, x0 + x), (y0 - y, x0 - x),
-                (y0 + x, x0 + y), (y0 + x, x0 - y),
-                (y0 - x, x0 + y), (y0 - x, x0 - y),
-            ]
-            pixels.extend(pts)
-            y += 1
-            if d <= 0:
-                d += 2 * y + 1
-            else:
-                x -= 1
-                d += 2 * (y - x) + 1
-        return [(r, c) for r, c in pixels if 0 <= r < self.rows and 0 <= c < self.cols]
-
-
-
     def adjust_color(self, hex_color, factor, lighten=False):
         """ Clareia ou escurece a cor """
         hex_color = hex_color.lstrip("#")
@@ -1065,27 +974,6 @@ class PixelEditor:
         if not preview and action_pixels:
             self.undo_stack.append(action_pixels)
 
-    # Função auxiliar para preview de pixels
-    def _draw_pixel_canvas(self, r, c, color, preview=False, fill=False):
-        x0, y0 = c * self.zoom, r * self.zoom
-        x1, y1 = x0 + self.zoom, y0 + self.zoom
-        self._draw_preview_pixel(r, c)
-
-    # Funções auxiliares para mirror
-    def _draw_mirror_preview(self, r, c):
-        if self.mirror_mode in ("HORIZONTAL", "BOTH"):
-            mc = self.cols - 1 - c
-            if 0 <= mc < self.cols and mc != c:
-                self._draw_pixel_canvas(r, mc, self.current_color, preview=True)
-        if self.mirror_mode in ("VERTICAL", "BOTH"):
-            mr = self.rows - 1 - r
-            if 0 <= mr < self.rows and mr != r:
-                self._draw_pixel_canvas(mr, c, self.current_color, preview=True)
-        if self.mirror_mode == "BOTH":
-            mr = self.rows - 1 - r
-            mc = self.cols - 1 - c
-            if 0 <= mr < self.rows and 0 <= mc < self.cols and (mr != r or mc != c):
-                self._draw_pixel_canvas(mr, mc, self.current_color, preview=True)
 
     def _draw_mirror_pixels(self, r, c, action_pixels):
         # Mirror horizontal
