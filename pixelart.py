@@ -3,7 +3,8 @@ import tkinter as tk
 from tkinter import colorchooser
 from tkinter.colorchooser import askcolor
 
-
+COR_1 = "#949492"
+COR_2 = "#a3a3a2"
 
 
 def bresenham_line(x0, y0, x1, y1):
@@ -41,7 +42,7 @@ class PixelEditor:
         # self.zoom = pixel_size
         self.current_color = "#000000"
         self.secondary_color = "#808080"  # cor secundária padrão (cinza neutro)
-        self.bg_color = "#ffffff"
+        self.bg_color = COR_2
         self.tool = "pencil"
 
         # Palette
@@ -186,7 +187,7 @@ class PixelEditor:
 
         if color is None:
             # Pixel transparente → desenha o fundo quadriculado
-            fill_color = "#cccccc" if (row + col) % 2 == 0 else "#eeeeee"
+            fill_color = COR_1 if (row + col) % 2 == 0 else COR_2
         else:
             fill_color = color
 
@@ -318,7 +319,7 @@ class PixelEditor:
                     if (r + c) % 2 == 0:
                         x0, y0 = c * ps, r * ps
                         x1, y1 = x0 + ps, y0 + ps
-                        self.canvas.create_rectangle(x0, y0, x1, y1, fill="#dddddd", outline="")
+                        self.canvas.create_rectangle(x0, y0, x1, y1, fill=COR_1, outline="")
 
         # Desenha pixels
         for r in range(self.rows):
